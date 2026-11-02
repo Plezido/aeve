@@ -1,50 +1,7 @@
 import { resolve4, resolve6, resolveNs } from 'node:dns/promises';
 import { domainToASCII } from 'node:url';
 import { parse } from 'tldts';
-
-const DNS_TIMEOUT = 5000;
-
-function isNoRecordError(error) {
-  return error.code === 'ENODATA';
-}
-
-function isNotFoundError(error) {
-  return error.code === 'ENOTFOUND';
-}
-
-async function safeResolve(resolver, domain) {
-  let timeout;
-
-  try {
-    const records = await Promise.race([
-      resolver(domain),
-      new Promise((_, reject) => {
-        timeout = setTimeout(() => {
-          const error = new Error('DNS lookup timed out.');
-          error.code = 'ETIMEOUT';
-          reject(error);
-        }, DNS_TIMEOUT);
-      })
-    ]);
-
-    return {
-      success: true,
-      records,
-      error: null
-    };
-  } catch (error) {
-    return {
-      success: false,
-      records: [],
-      error: {
-        code: error.code || 'UNKNOWN',
-        message: error.message
-      }
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
+import { safeDnsLookup } from '../utils/dns.js';
 
 export async function validateDomain(input) {
   if (typeof input !== 'string' || !input.trim()) {
@@ -79,9 +36,9 @@ export async function validateDomain(input) {
   }
 
   const [ipv4, ipv6, nameservers] = await Promise.all([
-    safeResolve(resolve4, domain),
-    safeResolve(resolve6, domain),
-    safeResolve(resolveNs, domain)
+    safeDnsLookup(resolve4, domain),
+    safeDnsLookup(resolve6, domain),
+    safeDnsLookup(resolveNs, domain)
   ]);
 
   const hasRecords =
@@ -111,14 +68,14 @@ export async function validateDomain(input) {
   }
 
   return {
-  domain,
-  domainExists:
-    status === 'exists'
-      ? true
-      : status === 'not_found'
-        ? false
-        : null,
-  status,
+    domain,
+    domainExists:
+      status === 'exists'
+        ? true
+        : status === 'not_found'
+          ? false
+          : null,
+    status,
     records: {
       ipv4: ipv4.records,
       ipv6: ipv6.records,

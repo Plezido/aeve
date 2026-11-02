@@ -1,30 +1,10 @@
-
 import {
   resolveMx,
   resolve4,
   resolve6
 } from 'node:dns/promises';
 
-async function safeLookup(resolver, domain) {
-  try {
-    const records = await resolver(domain);
-
-    return {
-      success: true,
-      records,
-      error: null
-    };
-  } catch (error) {
-    return {
-      success: false,
-      records: [],
-      error: {
-        code: error.code || 'UNKNOWN',
-        message: error.message
-      }
-    };
-  }
-}
+import { safeDnsLookup } from '../utils/dns.js';
 
 export async function validateMX(domain) {
   if (typeof domain !== 'string' || !domain.trim()) {
@@ -40,14 +20,16 @@ export async function validateMX(domain) {
 
   const normalizedDomain = domain.trim().toLowerCase();
 
-  const mxResult = await safeLookup(resolveMx, normalizedDomain);
+  const mxResult = await safeDnsLookup(
+    resolveMx,
+    normalizedDomain
+  );
 
   if (mxResult.success && mxResult.records.length > 0) {
-    const mxRecords = mxResult.records.sort(
+    const mxRecords = [...mxResult.records].sort(
       (a, b) => a.priority - b.priority
     );
 
-    // A Null MX record means the domain does not accept email.
     const isNullMX = mxRecords.some(
       record => record.exchange === '' || record.exchange === '.'
     );
@@ -91,12 +73,12 @@ export async function validateMX(domain) {
     };
   }
 
-  // RFC 5321 allows implicit MX routing through A/AAAA
-  // when a domain has no MX record.
+  // RFC 5321 permits implicit MX routing through A/AAAA
+  // records when no MX record exists.
 
   const [ipv4, ipv6] = await Promise.all([
-    safeLookup(resolve4, normalizedDomain),
-    safeLookup(resolve6, normalizedDomain)
+    safeDnsLookup(resolve4, normalizedDomain),
+    safeDnsLookup(resolve6, normalizedDomain)
   ]);
 
   const hasFallbackRoute =
