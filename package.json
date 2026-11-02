@@ -1,0 +1,19 @@
+{
+  "name": "aeve",
+  "version": "1.0.0",
+  "description": "Advanced Email Verification Engine",
+  "main": "./src/index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "p-limit": "^7.3.3",
+    "tldts": "^7.4.19",
+    "validator": "^13.15.35"
+  }
+}
