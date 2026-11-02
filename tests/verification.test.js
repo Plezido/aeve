@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { verifyBulk } from '../src/services/verify-bulk.js';
+import pLimit from 'p-limit';
 import { verifyEmail } from '../src/services/verify-email.js';
 import { detectRoleBasedEmail } from '../src/detectors/role-based.js';
 import { detectDisposableEmail } from '../src/detectors/disposable.js';
@@ -438,6 +439,34 @@ test('verifyBulk rejects non-array input', async () => {
   );
 });
 
+test('verifyBulk rejects batches larger than 1000 emails', async () => {
+  const emails = Array.from(
+    { length: 1001 },
+    (_, index) => `user${index}@example.com`
+  );
+
+  await assert.rejects(
+    verifyBulk(emails),
+    {
+      name: 'RangeError',
+      message: 'A maximum of 1000 emails can be processed per batch.'
+    }
+  );
+});
+
+test('verifyBulk accepts a batch of exactly 1000 emails', async () => {
+  const emails = Array.from(
+    { length: 1000 },
+    (_, index) => `invalid-${index}`
+  );
+
+  const result = await verifyBulk(emails);
+
+  assert.equal(result.summary.totalSubmitted, 1000);
+  assert.equal(result.summary.totalUnique, 1000);
+  assert.equal(result.summary.totalProcessed, 1000);
+});
+
 test('verifyBulk rejects invalid concurrency values', async () => {
   await assert.rejects(
     verifyBulk(['test@gmail.com'], { concurrency: 0 }),
@@ -493,6 +522,33 @@ test('verifyBulk respects the maximum concurrency setting', async () => {
       name: 'RangeError'
     }
   );
+});
+
+test('p-limit never exceeds the configured concurrency', async () => {
+  const limit = pLimit(3);
+
+  let activeTasks = 0;
+  let maximumActiveTasks = 0;
+
+  const tasks = Array.from({ length: 10 }, () =>
+    limit(async () => {
+      activeTasks++;
+
+      maximumActiveTasks = Math.max(
+        maximumActiveTasks,
+        activeTasks
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 20));
+
+      activeTasks--;
+    })
+  );
+
+  await Promise.all(tasks);
+
+  assert.equal(maximumActiveTasks, 3);
+  assert.equal(activeTasks, 0);
 });
 
 test('verifyEmail does not run SMTP diagnostics by default', async () => {
@@ -604,4 +660,33 @@ test('verifyEmail can run SMTP diagnostics on a cached result', async () => {
   assert.equal(result.cached, true);
   assert.equal(result.smtpDiagnostics.available, true);
   assert.equal(result.mailboxVerified, false);
+});
+
+test('verifyBulk isolates individual verification failures', async () => {
+  const result = await verifyBulk(
+    ['good@example.com', 'failed@example.com'],
+    {
+      verifyEmailFn: async email => {
+        if (email === 'failed@example.com') {
+          throw new Error('Simulated verification failure.');
+        }
+
+        return {
+          email,
+          status: 'checks_completed',
+          domain: {
+            mailRoute: true
+          }
+        };
+      }
+    }
+  );
+
+  assert.equal(result.results.length, 2);
+  assert.equal(result.results[0].status, 'checks_completed');
+  assert.equal(result.results[1].status, 'error');
+
+  assert.equal(result.summary.totalProcessed, 2);
+  assert.equal(result.summary.errors, 1);
+  assert.equal(result.summary.mailRoutesFound, 1);
 });
